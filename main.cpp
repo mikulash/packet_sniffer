@@ -12,25 +12,22 @@ int main(int argc, char **argv) {
     bool showICMP = true;
     bool showArp = true;
     int numberOfPackets = 10;
-    string rozhrani = "eth0";
+    string rozhrani = "ethasdf0";
 
     pcap_if_t *alldevsp , *device;
     pcap_t *handle; //Handle of the device that shall be sniffed
 
-    char errbuf[100] , *devname , devs[100][100];
+    char errbuf[PCAP_ERRBUF_SIZE] , *devname , devs[100][100];
     int count = 1 , n;
 
     if( pcap_findalldevs( &alldevsp , errbuf) )
     {
         exit(1);
     }
-    for(device = alldevsp ; device != nullptr ; device = device->next)
-    {
-        cout << device->name << std::endl;
-    }
+    device = alldevsp;
+    handle = pcap_open_live(device->name, BUFSIZ, 1, 1000, errbuf);
 
-
-    //cout << device->name << std::endl;
+    cout << device->name << std::endl;
     /*
      * parse arguments
     while ((opt = getopt (argc, argv, "aptun")) != -1)
