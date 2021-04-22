@@ -1,5 +1,4 @@
 #include <iostream>
-#include <unistd.h>
 #include <pcap/pcap.h>
 #include <getopt.h>
 #include <chrono>
@@ -7,6 +6,11 @@
 #include <iomanip>
 #include <cstring>
 #include <netinet/if_ether.h>
+#include <netinet/ether.h>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
+#include <netinet/ip_icmp.h>
 
 using namespace std;
 using namespace std::chrono;
@@ -20,13 +24,6 @@ using namespace std;
 /* ethernet headers are always exactly 14 bytes [1] */
 #define SIZE_ETHERNET 14
 
-
-/* Ethernet header */
-struct sniff_ethernet {
-    u_char  ether_dhost[ETHER_ADDR_LEN];    /* destination host address */
-    u_char  ether_shost[ETHER_ADDR_LEN];    /* source host address */
-    u_short ether_type;                     /* IP? ARP? RARP? etc */
-};
 
 /* IP header */
 struct sniff_ip {
@@ -44,47 +41,10 @@ struct sniff_ip {
     u_short ip_sum;                 /* checksum */
     struct  in_addr ip_src,ip_dst;  /* source and dest address */
 };
-#define IP_HL(ip)               (((ip)->ip_vhl) & 0x0f)
-#define IP_V(ip)                (((ip)->ip_vhl) >> 4)
 
-/* TCP header */
-typedef u_int tcp_seq;
-
-struct sniff_tcp {
-    u_short th_sport;               /* source port */
-    u_short th_dport;               /* destination port */
-    tcp_seq th_seq;                 /* sequence number */
-    tcp_seq th_ack;                 /* acknowledgement number */
-    u_char  th_offx2;               /* data offset, rsvd */
-#define TH_OFF(th)      (((th)->th_offx2 & 0xf0) >> 4)
-    u_char  th_flags;
-#define TH_FIN  0x01
-#define TH_SYN  0x02
-#define TH_RST  0x04
-#define TH_PUSH 0x08
-#define TH_ACK  0x10
-#define TH_URG  0x20
-#define TH_ECE  0x40
-#define TH_CWR  0x80
-#define TH_FLAGS        (TH_FIN|TH_SYN|TH_RST|TH_ACK|TH_URG|TH_ECE|TH_CWR)
-    u_short th_win;                 /* window */
-    u_short th_sum;                 /* checksum */
-    u_short th_urp;                 /* urgent pointer */
-};
-struct sniff_udp{
-    u_short th_sport;               /* source port */
-    u_short th_dport;               /* destination port */
-    u_short length;
-    u_short checksum;
-};
-struct sniff_icmp{
-    u_short type;               /* source port */
-    u_short code;               /* destination port */
-    unsigned short checksum;
-};
 
 void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet);
-void printPayload(const u_char *payload, int len);
+void printData(const u_char *payload, int len);
 string now_rfc3339();
 void print_hex_ascii_line(const u_char *payload, int len, int offset);
 
@@ -226,64 +186,110 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
 
     eptr = (ether_header*)packet;
     if (ntohs(eptr->ether_type) == ETHERTYPE_IP){
-        cout << "ETHER IP" <<endl;
 
         const u_char *payload;
-        int sizeIP;
-        int sizeTCP;
+        const u_char *headerHexa;
+        sockaddr_in source, dest;
+        int ipHeaderLen;
         int sizePayload;
-        sniff_ethernet *ethernet;
+        int sizeHeader;
         sniff_ip *ip;
-        sniff_tcp *tcp;
-        ethernet = (sniff_ethernet*)(packet);
         ip = (sniff_ip*)(packet+SIZE_ETHERNET);
-        sizeIP = IP_HL(ip)*4;
-        if (sizeIP < 20){
+        auto *ipHeader = (iphdr*)(packet + SIZE_ETHERNET);
+
+        ipHeaderLen = ipHeader->ihl * 4;
+
+        memset(&source, 0, sizeof(source));
+        memset(&dest, 0, sizeof(dest));
+        source.sin_addr.s_addr = ipHeader->saddr;
+        dest.sin_addr.s_addr = ipHeader->daddr;
+
+
+        if (ipHeaderLen < 20){
             cout << "nevalidni IP hlavicka" << std::endl;
             return;
         }
-        //from TCP
-        tcp = (sniff_tcp*)(packet + SIZE_ETHERNET + sizeIP);
-        sizeTCP = TH_OFF(tcp)*4;
-        payload = (u_char*)(packet + SIZE_ETHERNET + sizeIP + sizeTCP);
-        sizePayload = ntohs(ip->ip_len) - (sizeIP + sizeTCP);
-        cout << now_rfc3339() <<" "<< inet_ntoa(ip->ip_src)<< " : " << ntohs(tcp->th_sport);
-        cout << " > "<<inet_ntoa(ip->ip_dst) << " : " << ntohs(tcp->th_dport)<<", length "<< sizePayload<< " bytes" << std::endl;
-        //from TCP do sem
         switch(ip->ip_p){
             case IPPROTO_TCP:
                 if(showTCP){
-                    if (sizeTCP < 20){
+                    auto *tcpheader = (tcphdr*)(packet + ipHeaderLen + SIZE_ETHERNET);
+                    int tcpHeaderSize = tcpheader->doff * 4 + ipHeaderLen + SIZE_ETHERNET;
+
+                    cout << now_rfc3339() <<" "<< inet_ntoa(source.sin_addr)<< " : " <<  ntohs(tcpheader->source);
+                    cout << " > " << inet_ntoa(dest.sin_addr) << " : " << ntohs(tcpheader->dest) << ", length " << ntohs(ipHeader->tot_len) << " bytes" << std::endl;
+
+                    headerHexa = (u_char*)(packet);
+                    sizeHeader = ipHeaderLen + tcpheader->doff*4;
+
+                    cout << "IP and TCP Headers:" << endl;
+                    printData(headerHexa, sizeHeader);
+
+                    payload = (u_char*)(packet + tcpHeaderSize);
+                    sizePayload = ntohs(ipHeader->tot_len)+SIZE_ETHERNET - tcpHeaderSize;
+
+
+                    if (tcpHeaderSize < 20){
                         cout << "nevalidni TCP hlavicka" << std::endl;
                         return;
                     }
-                    cout << "TCP" << endl;
-                    printPayload(payload, sizePayload);
+                    int sizeAll = sizeHeader + sizePayload;
+                    cout << "TCP Payload:" << endl;
+                    printData(payload, sizePayload);
+
                     cout << std::endl;
                 }
                 break;
             case IPPROTO_UDP:
-                if(showUPD{
-                        cout << "UDP" << std::endl;
-                        printPayload(payload, sizePayload);
-                })
+                if(showUPD){
+
+                    auto *udpheader = (udphdr*)(packet + SIZE_ETHERNET + ipHeaderLen);
+                    int udpHeaderSize = sizeof(udpheader) + SIZE_ETHERNET + ipHeaderLen ;
+
+                    cout << now_rfc3339() <<" "<< inet_ntoa(source.sin_addr)<< " : " <<  ntohs(udpheader->source);
+                    cout << " > " << inet_ntoa(dest.sin_addr) << " : " << ntohs(udpheader->dest) << ", length " << ntohs(ipHeader->tot_len) << " bytes" << std::endl;
+
+                    headerHexa = (u_char*)(packet);
+                    sizeHeader = ipHeaderLen + sizeof(udpheader);
+
+                    cout << "IP and UDP Headers:" << endl;
+                    printData(headerHexa, sizeHeader);
+
+                    payload = (u_char*)(packet + udpHeaderSize);
+                    sizePayload = ntohs(ipHeader->tot_len) - udpHeaderSize + SIZE_ETHERNET;
+
+                    cout << "UDP Payload" << std::endl;
+                    printData(payload, sizePayload);
+
+                }
                 break;
             case IPPROTO_ICMP:
                 if (showICMP){
-                    cout << "ICMP" << std::endl;
-                    printPayload(payload, sizePayload);
+
+                    auto *icmpheader = (icmphdr*)(packet + SIZE_ETHERNET + ipHeaderLen);
+                    int icmpHeaderSize = sizeof(icmpheader) + SIZE_ETHERNET + ipHeaderLen ;
+
+
+
+                    payload = (u_char*)(packet + icmpHeaderSize);
+                    sizePayload = ntohs(ipHeader->tot_len) - icmpHeaderSize;
+
+                    cout << now_rfc3339() <<" "<< inet_ntoa(source.sin_addr);
+                    cout << " > " << inet_ntoa(dest.sin_addr)  << ", length " << ntohs(ipHeader->tot_len) << " bytes" << std::endl;
+
+                    cout << "IP and ICMP Header" << std::endl;
+                    printData(payload, sizePayload);
                 }
                 break;
         }
     } else if (ntohs(eptr->ether_type) == ETHERTYPE_ARP){
         cout << "ARP" <<endl;
 
+
     } else{
-        cout << "SOMETHING ELSE" << endl;
         return;
     }
 }
-void printPayload(const u_char *payload, int len){
+void printData(const u_char *payload, int len){
     const u_char *ch = payload;
     int offset = 0;
     int lineRest = len;
@@ -303,7 +309,7 @@ void printPayload(const u_char *payload, int len){
             break;
         }
     }
-    cout << payload << std::endl;
+    cout << std::endl;
 }
 
 void print_hex_ascii_line(const u_char *payload, int len, int offset)
