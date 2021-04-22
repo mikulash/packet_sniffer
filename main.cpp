@@ -6,6 +6,7 @@
 #include <ctime>
 #include <iomanip>
 #include <cstring>
+#include <netinet/if_ether.h>
 
 using namespace std;
 using namespace std::chrono;
@@ -19,8 +20,6 @@ using namespace std;
 /* ethernet headers are always exactly 14 bytes [1] */
 #define SIZE_ETHERNET 14
 
-/* Ethernet addresses are 6 bytes */
-#define ETHER_ADDR_LEN	6
 
 /* Ethernet header */
 struct sniff_ethernet {
@@ -90,20 +89,22 @@ string now_rfc3339();
 void print_hex_ascii_line(const u_char *payload, int len, int offset);
 
 
+ether_header *eptr;
+bool showTCP = false;
+bool showUPD = false;
+bool showICMP = false;
+bool showARP = false;
 
 int main(int argc, char **argv) {
     int opt;
-    string port = "port ";
+    string port = " ip && port ";
     char portname[15];
-    bool showTCP = false;
-    bool showUPD = false;
-    bool showICMP = false;
-    bool showARP = false;
+    bool portselected = false;
     int numberOfPackets = 1;
     string rozhrani = "notset";
     bpf_u_int32 ip_raw;
     char subnet_mask[13];
-    bool protokolspecifikovan = false;
+    bool protokolNespecifikovan = true;
     pcap_if_t *alldevsp , *device;
     pcap_t *handle;
     int c;
@@ -134,46 +135,47 @@ int main(int argc, char **argv) {
             case 'p':
                 //port
                 port.append(optarg);
+                portselected = true;
                 break;
             case 't':
                 //ukaz TCP
                 showTCP = true;
-                protokolspecifikovan = true;
+                protokolNespecifikovan = false;
                 break;
             case 'd':
                 //ukaz UDP
                 showUPD = true;
-                protokolspecifikovan = true;
+                protokolNespecifikovan = false;
                 break;
             case 'a':
                 //ukaz ICMP
                 showICMP = true;
-                protokolspecifikovan = true;
+                protokolNespecifikovan = false;
                 break;
             case 'b':
                 //ukaz ARP
                 showARP = true;
-                protokolspecifikovan = true;
+                protokolNespecifikovan = false;
                 break;
             case 'n':
                 //ukaz pocet paketu
                 numberOfPackets = atoi(optarg);
                 break;
             default:
-                abort ();
+                exit(1);
         }
     }
-
+    if (protokolNespecifikovan){
+        showTCP = showICMP = showUPD = showARP = true;
+    }
     strcpy(portname, port.c_str());
 
-    char errbuf[PCAP_ERRBUF_SIZE] , *devname , devs[100][100];
-    int count = 1 , n;
+    char errbuf[PCAP_ERRBUF_SIZE];
     if( pcap_findalldevs( &alldevsp , errbuf) )
     {
         exit(1);
     }
     device = alldevsp;
-
     if (rozhrani == "notset"){
         while(device != nullptr){
             cout << device->name << std::endl;
@@ -192,7 +194,6 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    int compileError;
     bpf_program fp;
     bpf_u_int32 mask;
     bpf_u_int32 net;
@@ -201,61 +202,85 @@ int main(int argc, char **argv) {
         mask = 0;
         net = 0;
     }
-
-    if( pcap_compile(handle, &fp, portname, 0, net) ==-1){
-        cout << "compile error" << std::endl;
-        exit(1);
+    if (portselected){
+        if( pcap_compile(handle, &fp, portname, 0, net) ==-1){
+            cout << "compile error" << std::endl;
+            return(1);
+        }
+        if (pcap_setfilter(handle, &fp) == -1){
+            cout << "cannot install filter" << std::endl;
+            return(1);
+        }
     }
-    if (pcap_setfilter(handle, &fp) == -1){
-        cout << "cannot install filter" << std::endl;
-        exit(1);
-    }
-
-    const u_char *packet;
-    pcap_pkthdr header;
 
     pcap_loop(handle, numberOfPackets, got_packet, nullptr);
 
     //clean
-    pcap_freecode(&fp);
+    //pcap_freecode(&fp);
     pcap_close(handle);
 
     return 0;
 }
 //funkce pro zpracovani packetu
-void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)
-{
-    const u_char *payload;
-    int sizeIP;
-    int sizeTCP;
-    int sizePayload;
-    sniff_ethernet *ethernet;
-    sniff_ip *ip;
-    sniff_tcp *tcp;
-    ethernet = (sniff_ethernet*)(packet);
-    ip = (sniff_ip*)(packet+SIZE_ETHERNET);
-    sizeIP = IP_HL(ip)*4;
-    if (sizeIP < 20){
-        cout << "nevalidni IP hlavicka" << std::endl;
-    }
-    switch(ip->ip_p){
-        case IPPROTO_TCP:
-            tcp = (sniff_tcp*)(packet + SIZE_ETHERNET + sizeIP);
-            sizeTCP = TH_OFF(tcp)*4;
-            if (sizeTCP < 20){
-                cout << "nevalidni TCP hlavicka" << std::endl;
-            }
-            cout << std::endl;
-            payload = (u_char*)(packet + SIZE_ETHERNET + sizeIP + sizeTCP);
-            sizePayload = ntohs(ip->ip_len) - (sizeIP + sizeTCP);
-            cout << now_rfc3339() <<" "<< inet_ntoa(ip->ip_src)<< " : " << ntohs(tcp->th_sport);
-            cout << " > "<<inet_ntoa(ip->ip_dst) << " : " << ntohs(tcp->th_dport)<<", "<< sizePayload<< " bytes" << std::endl;
-            printPayload(payload, sizePayload);
-            break;
-        case IPPROTO_UDP:
-            cout << "UDP" << std::endl;
-        case IPPROTO_ICMP:
-            cout << "ICMP" << std::endl;
+void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet){
+
+    eptr = (ether_header*)packet;
+    if (ntohs(eptr->ether_type) == ETHERTYPE_IP){
+        cout << "ETHER IP" <<endl;
+
+        const u_char *payload;
+        int sizeIP;
+        int sizeTCP;
+        int sizePayload;
+        sniff_ethernet *ethernet;
+        sniff_ip *ip;
+        sniff_tcp *tcp;
+        ethernet = (sniff_ethernet*)(packet);
+        ip = (sniff_ip*)(packet+SIZE_ETHERNET);
+        sizeIP = IP_HL(ip)*4;
+        if (sizeIP < 20){
+            cout << "nevalidni IP hlavicka" << std::endl;
+            return;
+        }
+        //from TCP
+        tcp = (sniff_tcp*)(packet + SIZE_ETHERNET + sizeIP);
+        sizeTCP = TH_OFF(tcp)*4;
+        payload = (u_char*)(packet + SIZE_ETHERNET + sizeIP + sizeTCP);
+        sizePayload = ntohs(ip->ip_len) - (sizeIP + sizeTCP);
+        cout << now_rfc3339() <<" "<< inet_ntoa(ip->ip_src)<< " : " << ntohs(tcp->th_sport);
+        cout << " > "<<inet_ntoa(ip->ip_dst) << " : " << ntohs(tcp->th_dport)<<", length "<< sizePayload<< " bytes" << std::endl;
+        //from TCP do sem
+        switch(ip->ip_p){
+            case IPPROTO_TCP:
+                if(showTCP){
+                    if (sizeTCP < 20){
+                        cout << "nevalidni TCP hlavicka" << std::endl;
+                        return;
+                    }
+                    cout << "TCP" << endl;
+                    printPayload(payload, sizePayload);
+                    cout << std::endl;
+                }
+                break;
+            case IPPROTO_UDP:
+                if(showUPD{
+                        cout << "UDP" << std::endl;
+                        printPayload(payload, sizePayload);
+                })
+                break;
+            case IPPROTO_ICMP:
+                if (showICMP){
+                    cout << "ICMP" << std::endl;
+                    printPayload(payload, sizePayload);
+                }
+                break;
+        }
+    } else if (ntohs(eptr->ether_type) == ETHERTYPE_ARP){
+        cout << "ARP" <<endl;
+
+    } else{
+        cout << "SOMETHING ELSE" << endl;
+        return;
     }
 }
 void printPayload(const u_char *payload, int len){
