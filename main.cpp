@@ -13,11 +13,9 @@
 
 using namespace std;
 using namespace std::chrono;
-using namespace std;
 
-/*zdroj hlavicky ip pro typecast z https://www.tcpdump.org/pcap.html */
 
-/* ethernet headers are always exactly 14 bytes */
+/* ethernet headers are always 14 bytes */
 #define SIZE_ETHERNET 14
 
 
@@ -25,11 +23,12 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
 void printData(const u_char *payload, int len);
 /*funkce pro cas ve formatu RFC3339 je z: https://stackoverflow.com/q/54325137 */
 string now_rfc3339();
-
+/*funkce pro vystupni format tisku prevzata z https://www.tcpdump.org/pcap.html */
 void print_hex_ascii_line(const u_char *payload, int len, int offset);
 
 
 ether_header *eptr;
+//booleany for display filter
 bool showTCP = false;
 bool showUPD = false;
 bool showICMP = false;
@@ -46,6 +45,7 @@ int main(int argc, char **argv) {
     pcap_if_t *alldevsp , *device;
     pcap_t *handle;
     int c;
+    //parsing arguments
     while (true)
     {
         static struct option long_options[] =
@@ -67,36 +67,30 @@ int main(int argc, char **argv) {
         switch (c)
         {
             case 'i':
-                //rozhrani
                 rozhrani = optarg;
                 break;
             case 'p':
-                //port
+                // get port
                 port.append(optarg);
                 portselected = true;
                 break;
             case 't':
-                //ukaz TCP
                 showTCP = true;
                 protokolNespecifikovan = false;
                 break;
             case 'u':
-                //ukaz UDP
                 showUPD = true;
                 protokolNespecifikovan = false;
                 break;
             case 'a':
-                //ukaz ICMP
                 showICMP = true;
                 protokolNespecifikovan = false;
                 break;
             case 'b':
-                //ukaz ARP
                 showARP = true;
                 protokolNespecifikovan = false;
                 break;
             case 'n':
-                //ukaz pocet paketu
                 numberOfPackets = atoi(optarg);
                 break;
             ;
@@ -107,12 +101,12 @@ int main(int argc, char **argv) {
     }
 
     char errbuf[PCAP_ERRBUF_SIZE];
-    if( pcap_findalldevs( &alldevsp , errbuf) )
+    if( pcap_findalldevs( &alldevsp , errbuf) ) //find active devices
     {
         exit(1);
     }
     device = alldevsp;
-    if (rozhrani == "notset"){
+    if (rozhrani == "notset"){  // if no active device was found
         while(device != nullptr){
             cout << device->name << std::endl;
             device = device->next;
@@ -120,12 +114,12 @@ int main(int argc, char **argv) {
         exit(0);
     }
 
-    handle = pcap_open_live(device->name, BUFSIZ, 1, 1000, errbuf);
+    handle = pcap_open_live(device->name, BUFSIZ, 1, 1000, errbuf); //opening ""sniffing session"
     if (handle == nullptr){
         cout << "handle == nullptr" << std::endl;
         exit(1);
     }
-    if (pcap_datalink(handle) != DLT_EN10MB) {
+    if (pcap_datalink(handle) != DLT_EN10MB) { //check presence of ethernet header
         cout << "handle error" << std::endl;
         exit(1);
     }
@@ -133,13 +127,13 @@ int main(int argc, char **argv) {
     bpf_program fp;
     bpf_u_int32 mask;
     bpf_u_int32 net;
-    if (pcap_lookupnet(device->name, &net, &mask, errbuf) == -1){ //vraci IPv4 adresu
+    if (pcap_lookupnet(device->name, &net, &mask, errbuf) == -1){ //returns ipv4 network number and network mask
         cout << "cannot get netmask" << std::endl;
         mask = 0;
         net = 0;
     }
     if (portselected){
-        if( pcap_compile(handle, &fp, portname, 0, net) ==-1){
+        if( pcap_compile(handle, &fp, portname, 0, net) ==-1){ //compile filter
             cout << "compile error" << std::endl;
             return(1);
         }
@@ -149,7 +143,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    pcap_loop(handle, numberOfPackets, got_packet, nullptr);
+    pcap_loop(handle, numberOfPackets, got_packet, nullptr); //calls got_packet function for every packet found
 
     //clean
     //pcap_freecode(&fp);
@@ -158,11 +152,11 @@ int main(int argc, char **argv) {
     return 0;
 }
 
-//funkce pro zpracovani packetu
+//callback function for pcap_loop
 void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet){
 
     eptr = (ether_header*)packet;
-    if (ntohs(eptr->ether_type) == ETHERTYPE_IP){
+    if (ntohs(eptr->ether_type) == ETHERTYPE_IP){ //if device has ip header
 
         const u_char *payload;
         const u_char *headerHexa;
@@ -177,54 +171,50 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
             cout << "nevalidni IP hlavicka" << std::endl;
             exit(1);
         }
-
-        memset(&source, 0, sizeof(source));
-        memset(&dest, 0, sizeof(dest));
+        //gets source and destination addresses
         source.sin_addr.s_addr = ipHeader->saddr;
         dest.sin_addr.s_addr = ipHeader->daddr;
 
         switch(ipHeader->protocol){
-            case 1:
-                cout<< "ICMPprotokol" << endl;
-                if (showICMP){
+            case 1: //if protocol is ICMP
+                if (showICMP){ //if we want to display packets with protocol ICMP
 
                     auto *icmpheader = (icmphdr*)(packet + SIZE_ETHERNET + ipHeaderLen);
-                    int icmpHeaderSize = sizeof(icmpheader) + SIZE_ETHERNET + ipHeaderLen ;
+                    int icmpHeaderSize = sizeof(icmpheader) + SIZE_ETHERNET + ipHeaderLen;
 
+                    //sets offset for payload
                     payload = (u_char*)(packet + icmpHeaderSize);
                     sizePayload = ntohs(ipHeader->tot_len) - icmpHeaderSize;
 
+                    //print time and data about packet and value of packet
                     cout << now_rfc3339() <<" "<< inet_ntoa(source.sin_addr);
                     cout << " > " << inet_ntoa(dest.sin_addr)  << ", length " << ntohs(ipHeader->tot_len) << " bytes" << std::endl;
-
-                    cout << "IP and ICMP Header" << std::endl;
                     printData(payload, sizePayload);
                 }
                 break;
             case 6:
-                cout<< "TCPprotokol" << endl;
+                //if we want to display packets with protocol TCP
                 if(showTCP){
                     auto *tcpheader = (tcphdr*)(packet + ipHeaderLen + SIZE_ETHERNET);
                     int tcpHeaderSize = tcpheader->doff * 4 + ipHeaderLen + SIZE_ETHERNET;
 
                     cout << now_rfc3339() <<" "<< inet_ntoa(source.sin_addr)<< " : " <<  ntohs(tcpheader->source);
                     cout << " > " << inet_ntoa(dest.sin_addr) << " : " << ntohs(tcpheader->dest) << ", length " << ntohs(ipHeader->tot_len) << " bytes" << std::endl;
-
+                    //sets offset for headers
                     headerHexa = (u_char*)(packet);
                     sizeHeader = ipHeaderLen + tcpheader->doff*4+SIZE_ETHERNET;
 
                     cout << "IP and TCP Headers:" << endl;
                     printData(headerHexa, sizeHeader);
-
+                    //sets offset for payload
                     payload = (u_char*)(packet + tcpHeaderSize);
                     sizePayload = ntohs(ipHeader->tot_len)+SIZE_ETHERNET - tcpHeaderSize;
 
-
                     if (tcpHeaderSize < 20){
-                        cout << "nevalidni TCP hlavicka" << std::endl;
+                        cout << "invalid TCP header" << std::endl;
                         return;
                     }
-                    int sizeAll = sizeHeader + sizePayload;
+
                     cout << "TCP Payload:" << endl;
                     printData(payload, sizePayload);
 
@@ -232,7 +222,7 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
                 }
                 break;
             case 17:
-                cout<< "UDPprotokol" << endl;
+                //if we want to display packets with protocol UDP
                 if(showUPD) {
 
                     auto *udpheader = (udphdr *) (packet + SIZE_ETHERNET + ipHeaderLen);
@@ -241,13 +231,14 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
                     cout << now_rfc3339() << " " << inet_ntoa(source.sin_addr) << " : " << ntohs(udpheader->source);
                     cout << " > " << inet_ntoa(dest.sin_addr) << " : " << ntohs(udpheader->dest) << ", length "
                          << ntohs(ipHeader->tot_len) << " bytes" << std::endl;
-
+                    //sets offset for headers
                     headerHexa = (u_char *) (packet);
                     sizeHeader = ipHeaderLen + sizeof(udpheader) + SIZE_ETHERNET;
 
                     cout << "IP and UDP Headers:" << endl;
                     printData(headerHexa, sizeHeader);
 
+                    //sets offset for payload
                     payload = (u_char *) (packet + udpHeaderSize);
                     sizePayload = ntohs(ipHeader->tot_len) - udpHeaderSize + SIZE_ETHERNET;
 
@@ -256,15 +247,15 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
                 }
                     break;
             default:
-                cout<< "nepodporovany protokol" << endl;
+                cout<< "unsupported protocol" << endl;
                 break;
         }
 
-    } else if (ntohs(eptr->ether_type) == ETHERTYPE_ARP){
+    } else if (ntohs(eptr->ether_type) == ETHERTYPE_ARP){ //if device has ARP header
         if (showARP){
             cout << "ARP" <<endl;
             cout << now_rfc3339() << " ";
-            const u_char *ch = packet + 6; //adresa zdroje je od 6 bytu
+            const u_char *ch = packet + 6; //source address offset is always 6 bits
             int i;
             for(i = 0; i < 6; i++) {
                 if(i != 5){
@@ -287,6 +278,7 @@ void printData(const u_char *payload, int len){
     int thisLineLength;
     if (len <= 0){return;}
     if (len < 16){
+        //if line shorter, dont loop
         print_hex_ascii_line(ch, len, offset);
     }else{
         while(true){
@@ -305,6 +297,7 @@ void printData(const u_char *payload, int len){
     cout << std::endl;
 }
 
+/*funkce pro vystupni format tisku prevzata z https://www.tcpdump.org/pcap.html */
 void print_hex_ascii_line(const u_char *payload, int len, int offset)
 {
     int i;
