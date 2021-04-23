@@ -19,7 +19,7 @@ using namespace std::chrono;
 #define SIZE_ETHERNET 14
 
 
-void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet);
+void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char *packet);
 void printData(const u_char *payload, int len);
 /*funkce pro cas ve formatu RFC3339 je z: https://stackoverflow.com/q/54325137 */
 string now_rfc3339();
@@ -93,9 +93,14 @@ int main(int argc, char **argv) {
             case 'n':
                 numberOfPackets = atoi(optarg);
                 break;
+            case '?':
+                if (optopt == 'i'){
+                    cout << "i without param" <<endl;
+                    break;
+                } else exit(1);
             default:
                 cout << "not valid argument" << endl;
-                exit(1);
+                exit (1);
             ;
         }
     }
@@ -146,7 +151,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    pcap_loop(handle, numberOfPackets, got_packet, nullptr); //calls got_packet function for every packet found
+    pcap_loop(handle, numberOfPackets, processPacket, nullptr); //calls processPacket function for every packet found
 
     //clean
     //pcap_freecode(&fp);
@@ -156,7 +161,7 @@ int main(int argc, char **argv) {
 }
 
 //callback function for pcap_loop
-void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet){
+void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char *packet){
 
     eptr = (ether_header*)packet;
     if (ntohs(eptr->ether_type) == ETHERTYPE_IP){ //if device has ip header
@@ -209,7 +214,9 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
                     sizeHeader = ipHeaderLen + tcpheader->doff*4+SIZE_ETHERNET;
 
                     cout << "IP and TCP Headers:" << endl;
-                    printData(headerHexa, sizeHeader);
+                    if (sizeHeader > 0){
+                        printData(headerHexa, sizeHeader);
+                    }
 
                     //sets offset for payload
                     payload = (u_char*)(packet + tcpHeaderSize);
@@ -220,8 +227,10 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
                         return;
                     }
 
-                    cout << "TCP Payload:" << endl;
-                    printData(payload, sizePayload);
+                    if(sizePayload > 0){
+                        cout << "TCP Payload" << std::endl;
+                        printData(payload, sizePayload);
+                    }
 
                     cout << std::endl;
                 }
@@ -242,14 +251,20 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
                     sizeHeader = ipHeaderLen + sizeof(udpheader) + SIZE_ETHERNET;
 
                     cout << "IP and UDP Headers:" << endl;
-                    printData(headerHexa, sizeHeader);
+                    if (sizeHeader > 0){
+                        printData(headerHexa, sizeHeader);
+                    }
 
                     //sets offset for payload
                     payload = (u_char *) (packet + udpHeaderSize);
                     sizePayload = ntohs(ipHeader->tot_len) - udpHeaderSize + SIZE_ETHERNET;
 
-                    cout << "UDP Payload" << std::endl;
-                    printData(payload, sizePayload);
+
+                    if(sizePayload > 0){
+                        cout << "UDP Payload" << std::endl;
+                        printData(payload, sizePayload);
+                    }
+
                 }
                     break;
             default:
@@ -259,8 +274,8 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
 
     } else if (ntohs(eptr->ether_type) == ETHERTYPE_ARP){ //if device has ARP header
         if (showARP){
-            cout << "ARP" <<endl;
             cout << now_rfc3339() << " ";
+
             const u_char *ch = packet + 6; //source address offset is always 6 bits
             int i;
             for(i = 0; i < 6; i++) {
@@ -271,9 +286,13 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
                 ch++;
             }
             cout << endl;
-            printData(packet, header->len);
+            cout << "ARP" <<endl;
+            if (header->len > 0){
+                printData(packet, header->len);
+            }
         }
     } else{
+        cout<< "unsupported ether type" << endl;
         return;
     }
 }
@@ -282,7 +301,6 @@ void printData(const u_char *payload, int len){
     int offset = 0;
     int lineRest = len;
     int thisLineLength;
-    if (len <= 0){return;}
     if (len < 16){
         //if line shorter, dont loop
         print_hex_ascii_line(ch, len, offset);

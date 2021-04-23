@@ -4,7 +4,7 @@
 #include <getopt.h>
 using namespace std;
 
-void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet);
+void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char *packet);
 
 int main(int argc, char **argv) {
     int opt;
@@ -126,14 +126,14 @@ int main(int argc, char **argv) {
     cout << "jsem tu" << std::endl;
     cout << device->name << std::endl;
     //packet = pcap_next(handle, &header);
-    pcap_loop(handle, numberOfPackets, got_packet, nullptr);
+    pcap_loop(handle, numberOfPackets, processPacket, nullptr);
     cout << header.len << std::endl;
     pcap_close(handle);
     cout << "proslo zatim ok" << std::endl;
 
     return 0;
 }
-void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)
+void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)
 {
     cout << "jsem tu" << std::endl;
 }
