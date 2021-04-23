@@ -195,7 +195,7 @@ void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char 
                     payload = (u_char*)(packet + icmpHeaderSize);
                     sizePayload = ntohs(ipHeader->tot_len) - icmpHeaderSize;
 
-                    //print time and data about packet and value of packet
+                    //print time and data about packet and headervalue of packet
                     cout << now_rfc3339() <<" "<< inet_ntoa(source.sin_addr);
                     cout << " > " << inet_ntoa(dest.sin_addr)  << ", length " << ntohs(ipHeader->tot_len) << " bytes" << std::endl;
                     printData(payload, sizePayload);
@@ -297,22 +297,22 @@ void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char 
     }
 }
 void printData(const u_char *payload, int len){
-    const u_char *ch = payload;
+    const u_char *addr = payload;
     int offset = 0;
     int lineRest = len;
     int thisLineLength;
     if (len < 16){
         //if line shorter, dont loop
-        print_hex_ascii_line(ch, len, offset);
+        print_hex_ascii_line(addr, len, offset);
     }else{
         while(true){
             thisLineLength = 16 % lineRest;
-            print_hex_ascii_line(ch, thisLineLength, offset);
+            print_hex_ascii_line(addr, thisLineLength, offset);
             lineRest = lineRest - thisLineLength;
-            ch = ch + thisLineLength;
+            addr = addr + thisLineLength;
             offset += 16;
             if(lineRest <=16){
-                print_hex_ascii_line(ch, lineRest, offset);
+                print_hex_ascii_line(addr, lineRest, offset);
                 break;
             }
         }
@@ -364,7 +364,7 @@ void print_hex_ascii_line(const u_char *payload, int len, int offset)
     cout << std::endl;
 }
 
-/*funkce pro cas ve formatu RFC3339 je z: https://stackoverflow.com/q/54325137 */
+/*funkce pro cas ve formatu RFC3339 je z: https://stackoverflow.com/q/54325137*/
 string now_rfc3339() {
     const auto now = system_clock::now();
     const auto millis = duration_cast<milliseconds>(now.time_since_epoch()).count() % 1000;
