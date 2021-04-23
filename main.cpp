@@ -40,8 +40,8 @@ int main(int argc, char **argv) {
     char portname[15];
     bool portselected = false;
     int numberOfPackets = 1;
-    string rozhrani = "notset";
-    bool protokolNespecifikovan = true;
+    string deviceName = "notset";
+    bool protocolNotSpecified = true;
     pcap_if_t *alldevsp , *device;
     pcap_t *handle;
     int c;
@@ -67,7 +67,7 @@ int main(int argc, char **argv) {
         switch (c)
         {
             case 'i':
-                rozhrani = optarg;
+                deviceName = optarg;
                 break;
             case 'p':
                 // get port
@@ -76,27 +76,30 @@ int main(int argc, char **argv) {
                 break;
             case 't':
                 showTCP = true;
-                protokolNespecifikovan = false;
+                protocolNotSpecified = false;
                 break;
             case 'u':
                 showUPD = true;
-                protokolNespecifikovan = false;
+                protocolNotSpecified = false;
                 break;
             case 'a':
                 showICMP = true;
-                protokolNespecifikovan = false;
+                protocolNotSpecified = false;
                 break;
             case 'b':
                 showARP = true;
-                protokolNespecifikovan = false;
+                protocolNotSpecified = false;
                 break;
             case 'n':
                 numberOfPackets = atoi(optarg);
                 break;
+            default:
+                cout << "not valid argument" << endl;
+                exit(1);
             ;
         }
     }
-    if (protokolNespecifikovan){
+    if (protocolNotSpecified){
         showTCP = showICMP = showUPD = showARP = true;
     }
 
@@ -106,7 +109,7 @@ int main(int argc, char **argv) {
         exit(1);
     }
     device = alldevsp;
-    if (rozhrani == "notset"){  // if no active device was found
+    if (deviceName == "notset"){  // if no active device was found
         while(device != nullptr){
             cout << device->name << std::endl;
             device = device->next;
@@ -176,6 +179,7 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
         dest.sin_addr.s_addr = ipHeader->daddr;
 
         switch(ipHeader->protocol){
+            //numbers according to protocol numbers, viz https://en.wikipedia.org/wiki/List_of_IP_protocol_numbers
             case 1: //if protocol is ICMP
                 if (showICMP){ //if we want to display packets with protocol ICMP
 
@@ -206,6 +210,7 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
 
                     cout << "IP and TCP Headers:" << endl;
                     printData(headerHexa, sizeHeader);
+
                     //sets offset for payload
                     payload = (u_char*)(packet + tcpHeaderSize);
                     sizePayload = ntohs(ipHeader->tot_len)+SIZE_ETHERNET - tcpHeaderSize;
@@ -231,6 +236,7 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
                     cout << now_rfc3339() << " " << inet_ntoa(source.sin_addr) << " : " << ntohs(udpheader->source);
                     cout << " > " << inet_ntoa(dest.sin_addr) << " : " << ntohs(udpheader->dest) << ", length "
                          << ntohs(ipHeader->tot_len) << " bytes" << std::endl;
+
                     //sets offset for headers
                     headerHexa = (u_char *) (packet);
                     sizeHeader = ipHeaderLen + sizeof(udpheader) + SIZE_ETHERNET;
@@ -297,7 +303,8 @@ void printData(const u_char *payload, int len){
     cout << std::endl;
 }
 
-/*funkce pro vystupni format tisku prevzata z https://www.tcpdump.org/pcap.html */
+/*funkce pro vystupni format tisku prevzata z https://www.tcpdump.org/pcap.html
+ * Autor: Tim Carstens*/
 void print_hex_ascii_line(const u_char *payload, int len, int offset)
 {
     int i;
@@ -347,6 +354,6 @@ string now_rfc3339() {
 
     stringstream ss;
     ss << put_time(gmtime(&c_now), "%FT%T") <<
-       '.' << setfill('0') << setw(3) << millis << "+01:00";
+       '.' << setfill('0') << setw(3) << millis << "+01:00"; //timezone hardcoded
     return ss.str();
 }
