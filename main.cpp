@@ -4,7 +4,6 @@
 #include <chrono>
 #include <ctime>
 #include <iomanip>
-#include <cstring>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
@@ -164,7 +163,7 @@ int main(int argc, char **argv) {
 void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char *packet){
 
     eptr = (ether_header*)packet;
-    if (ntohs(eptr->ether_type) == ETHERTYPE_IP){ //if device has ip header
+    if (ntohs(eptr->ether_type) == ETHERTYPE_IP || ntohs(eptr->ether_type) == ETHERTYPE_IPV6){ //if device has ip header
 
         const u_char *payload;
         const u_char *headerHexa;
@@ -175,9 +174,10 @@ void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char 
         auto *ipHeader = (iphdr*)(packet + SIZE_ETHERNET);
 
         ipHeaderLen = ipHeader->ihl * 4;
-        if (ipHeaderLen < 20){
+        if (ipHeaderLen < 20 && ntohs(eptr->ether_type) == ETHERTYPE_IP){
+            cout <<ipHeaderLen << endl;
             cout << "nevalidni IP hlavicka" << std::endl;
-            exit(1);
+            return ;
         }
         //gets source and destination addresses
         source.sin_addr.s_addr = ipHeader->saddr;
@@ -268,7 +268,7 @@ void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char 
                 }
                     break;
             default:
-                cout<< "unsupported protocol" << endl;
+                cout<< "unsupported protocol " << ntohs(ipHeader->protocol) << endl;
                 break;
         }
 

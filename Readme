@@ -1,0 +1,11 @@
+Packet sniffer v C++
+
+Přeložení lze provést příkazem make nebo make all. Pro úklid souborů lze použít make clean.
+
+Projekt se spouští příkazem sudo ./ipk-sniffer a argumenty. Je potřeba root oprávnění.
+
+Co je mi známo, program běží v plném rozsahu zadání.
+Možnou odlišností může být mnou implementované filtrování, kde filtrování probíhá až při zobrazování, podobně jako v programu wireshark.
+Tedy například při argumentu --tcp jsou načítány všechny pakety, zpracováný a zobrazováný jsou ale jen tcp.
+
+Do výstopního formátu jsem také ke každému packetu přidal název jeho protokolu a vypsané bajty rozdělil na hlavičky a payload.
