@@ -306,6 +306,7 @@ void printData(const u_char *payload, int len){
         print_hex_ascii_line(addr, len, offset);
     }else{
         while(true){
+            //loop until all printed
             thisLineLength = 16 % lineRest;
             print_hex_ascii_line(addr, thisLineLength, offset);
             lineRest = lineRest - thisLineLength;
