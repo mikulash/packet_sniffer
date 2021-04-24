@@ -266,7 +266,7 @@ void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char 
                 }
                     break;
             default:
-                cout<< "unsupported protocol " << ntohs(ipHeader->protocol) << endl;
+                //cout<< "unsupported protocol " << ntohs(ipHeader->protocol) << endl;
                 break;
         }
 
@@ -381,7 +381,7 @@ void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char 
                 }
                 break;
             default:
-                cout<< "unsupported protocol " << ntohs(protocol) << endl;
+                //cout<< "unsupported protocol " << ntohs(protocol) << endl;
                 break;
         }
 
@@ -405,7 +405,7 @@ void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char 
             }
         }
     } else{
-        cout<< "unsupported ether type" << endl;
+        //cout<< "unsupported ether type" << endl;
         return;
     }
 }
