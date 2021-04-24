@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
+#include <netinet/ip6.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
 #include <netinet/ip_icmp.h>
@@ -13,10 +14,8 @@
 using namespace std;
 using namespace std::chrono;
 
-
 /* ethernet headers are always 14 bytes */
 #define SIZE_ETHERNET 14
-
 
 void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char *packet);
 void printData(const u_char *payload, int len);
@@ -49,7 +48,7 @@ int main(int argc, char **argv) {
     {
         static struct option long_options[] =
                 {
-                        {"", required_argument, nullptr, 'i'},
+                        {"interface", required_argument, nullptr, 'i'},
                         {"", required_argument, nullptr, 'p'},
                         {"tcp", no_argument,nullptr, 't'},
                         {"udp", no_argument,nullptr, 'u'},
@@ -163,7 +162,7 @@ int main(int argc, char **argv) {
 void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char *packet){
 
     eptr = (ether_header*)packet;
-    if (ntohs(eptr->ether_type) == ETHERTYPE_IP || ntohs(eptr->ether_type) == ETHERTYPE_IPV6){ //if device has ip header
+    if (ntohs(eptr->ether_type) == ETHERTYPE_IP){ //if device has ip header
 
         const u_char *payload;
         const u_char *headerHexa;
@@ -174,7 +173,7 @@ void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char 
         auto *ipHeader = (iphdr*)(packet + SIZE_ETHERNET);
 
         ipHeaderLen = ipHeader->ihl * 4;
-        if (ipHeaderLen < 20 && ntohs(eptr->ether_type) == ETHERTYPE_IP){
+        if (ipHeaderLen < 20){
             cout <<ipHeaderLen << endl;
             cout << "nevalidni IP hlavicka" << std::endl;
             return ;
@@ -194,7 +193,7 @@ void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char 
                     //sets offset for payload
                     payload = (u_char*)(packet + icmpHeaderSize);
                     sizePayload = ntohs(ipHeader->tot_len) - icmpHeaderSize;
-
+                    cout << "ICMPv4:" << endl;
                     //print time and data about packet and headervalue of packet
                     cout << now_rfc3339() <<" "<< inet_ntoa(source.sin_addr);
                     cout << " > " << inet_ntoa(dest.sin_addr)  << ", length " << ntohs(ipHeader->tot_len) << " bytes" << std::endl;
@@ -264,11 +263,125 @@ void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char 
                         cout << "UDP Payload" << std::endl;
                         printData(payload, sizePayload);
                     }
-
                 }
                     break;
             default:
                 cout<< "unsupported protocol " << ntohs(ipHeader->protocol) << endl;
+                break;
+        }
+
+    }else if(ntohs(eptr->ether_type) == ETHERTYPE_IPV6){
+        const u_char *payload;
+        const u_char *headerHexa;
+        sockaddr_in6 source, dest;
+        int ipHeaderLen;
+        int sizePayload;
+        int sizeHeader;
+        auto *ipHeader = (ip6_hdr*)(packet + SIZE_ETHERNET);
+
+        ipHeaderLen = 40;
+
+        //gets source and destination addresses
+        source.sin6_addr = ipHeader->ip6_src;
+        dest.sin6_addr = ipHeader->ip6_dst;
+
+        char srcstring[INET6_ADDRSTRLEN];
+        char dststring[INET6_ADDRSTRLEN];
+        inet_ntop(AF_INET6, &source.sin6_addr, srcstring, INET6_ADDRSTRLEN);
+        inet_ntop(AF_INET6, &dest.sin6_addr, dststring, INET6_ADDRSTRLEN);
+
+
+        uint8_t protocol = ipHeader->ip6_ctlun.ip6_un1.ip6_un1_nxt;
+        if (protocol == 0){
+            ipHeaderLen = 48;
+            protocol = *(uint8_t*)(packet + 40);
+        }
+
+
+        sizePayload = ipHeader->ip6_ctlun.ip6_un1.ip6_un1_plen;
+
+        switch(protocol){
+            //numbers according to protocol numbers, viz https://en.wikipedia.org/wiki/List_of_IP_protocol_numbers
+            case 58: //if protocol is ICMPv6
+                if (showICMP){ //if we want to display packets with protocol ICMP
+
+                    auto *icmpheader = (icmphdr*)(packet + SIZE_ETHERNET + ipHeaderLen);
+                    int icmpHeaderSize = sizeof(icmpheader) + SIZE_ETHERNET + ipHeaderLen;
+
+                    //sets offset for payload
+                    payload = (u_char*)(packet + icmpHeaderSize);
+
+                    //print time and data about packet and headervalue of packet
+                    cout << "ICMPv6:" << endl;
+                    cout << now_rfc3339() <<" "<< srcstring;
+                    cout << " > " << dststring  << ", length " << sizePayload+ipHeaderLen+SIZE_ETHERNET << " bytes" << std::endl;
+                    printData(payload, sizePayload);
+                }
+                break;
+            case 6:
+                //if we want to display packets with protocol TCP
+                if(showTCP){
+                    auto *tcpheader = (tcphdr*)(packet + ipHeaderLen + SIZE_ETHERNET);
+                    int tcpHeaderSize = tcpheader->doff * 4 + ipHeaderLen + SIZE_ETHERNET;
+
+                    cout << now_rfc3339() <<" "<< srcstring<< " : " <<  ntohs(tcpheader->source);
+                    cout << " > " << dststring << " : " << ntohs(tcpheader->dest) << ", length " << sizePayload+ipHeaderLen+SIZE_ETHERNET << " bytes" << std::endl;
+                    //sets offset for headers
+                    headerHexa = (u_char*)(packet);
+                    sizeHeader = ipHeaderLen + tcpheader->doff*4+SIZE_ETHERNET;
+
+                    cout << "IP and TCP Headers:" << endl;
+                    if (sizeHeader > 0){
+                        printData(headerHexa, sizeHeader);
+                    }
+
+                    //sets offset for payload
+                    payload = (u_char*)(packet + tcpHeaderSize);
+
+                    if (tcpHeaderSize < 20){
+                        cout << "invalid TCP header" << std::endl;
+                        return;
+                    }
+
+                    if(sizePayload > 0){
+                        cout << "TCP Payload" << std::endl;
+                        printData(payload, sizePayload);
+                    }
+
+                    cout << std::endl;
+                }
+                break;
+            case 17:
+                //if we want to display packets with protocol UDP
+                if(showUPD) {
+
+                    auto *udpheader = (udphdr *) (packet + SIZE_ETHERNET + ipHeaderLen);
+                    int udpHeaderSize = sizeof(udpheader) + SIZE_ETHERNET + ipHeaderLen;
+
+                    cout << now_rfc3339() << " " << srcstring << " : " << ntohs(udpheader->source);
+                    cout << " > " << dststring << " : " << ntohs(udpheader->dest) << ", length "
+                         << sizePayload+ipHeaderLen+SIZE_ETHERNET << " bytes" << std::endl;
+
+                    //sets offset for headers
+                    headerHexa = (u_char *) (packet);
+                    sizeHeader = ipHeaderLen + sizeof(udpheader) + SIZE_ETHERNET;
+
+                    cout << "IP and UDP Headers:" << endl;
+                    if (sizeHeader > 0){
+                        printData(headerHexa, sizeHeader);
+                    }
+
+                    //sets offset for payload
+                    payload = (u_char *) (packet + udpHeaderSize);
+
+                    if(sizePayload > 0){
+                        cout << "UDP Payload" << std::endl;
+                        printData(payload, sizePayload);
+                    }
+                }
+                break;
+            default:
+                cout<< "unsupported protocol " << ntohs(protocol) << endl;
                 break;
         }
 
