@@ -10,6 +10,7 @@
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
 #include <netinet/ip_icmp.h>
+#include <netinet/icmp6.h>
 
 using namespace std;
 using namespace std::chrono;
@@ -305,7 +306,7 @@ void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char 
             case 58: //if protocol is ICMPv6
                 if (showICMP){ //if we want to display packets with protocol ICMP
 
-                    auto *icmpheader = (icmphdr*)(packet + SIZE_ETHERNET + ipHeaderLen);
+                    auto *icmpheader = (icmp6_hdr*)(packet + SIZE_ETHERNET + ipHeaderLen);
                     int icmpHeaderSize = sizeof(icmpheader) + SIZE_ETHERNET + ipHeaderLen;
 
                     //sets offset for payload
