@@ -298,7 +298,6 @@ void processPacket(u_char *args, const struct pcap_pkthdr *header, const u_char 
             protocol = *(uint8_t*)(packet + 40);
         }
 
-
         sizePayload = ipHeader->ip6_ctlun.ip6_un1.ip6_un1_plen;
 
         switch(protocol){
